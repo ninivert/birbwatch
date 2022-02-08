@@ -1,0 +1,14 @@
+{
+	streams: [
+		{
+			"name": "youtube example",
+			"description": "a youtube stream example",
+			"url": "https://youtu.be/MMbTUvSjnB4"
+		},
+		{
+			"name": "m3u8 example",
+			"description": "a m3u8 stream example",
+			"url": "https://live.hdontap.com/hls/hosb3/fobwr_eagles-ptz.stream/playlist.m3u8"
+		}
+	]
+}
