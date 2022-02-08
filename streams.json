@@ -1,5 +1,5 @@
 {
-	streams: [
+	"streamlist": [
 		{
 			"name": "youtube example",
 			"description": "a youtube stream example",
