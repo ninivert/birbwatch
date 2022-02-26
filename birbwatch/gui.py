@@ -181,12 +181,9 @@ class PlayerWidget(QtWidgets.QWidget):
 		self.setLayout(QtWidgets.QVBoxLayout())
 		self.layout().setContentsMargins(0, 0, 0, 0)
 
-		self.q_media = QtMultimedia.QMediaPlayer()
+		self.q_media = None
 		self.q_audio = QtMultimedia.QAudioOutput()
 		self.q_video = QtMultimediaWidgets.QVideoWidget()
-
-		self.q_media.setAudioOutput(self.q_audio)
-		self.q_media.setVideoOutput(self.q_video)
 
 		self.q_settingsbtn = QtWidgets.QPushButton('Settings')
 		self.q_settingsbtn.clicked.connect(C.show_settings)
@@ -195,23 +192,28 @@ class PlayerWidget(QtWidgets.QWidget):
 		self.layout().addWidget(self.q_video)
 		self.layout().addWidget(self.q_settingsbtn)
 
-		self.q_media.mediaStatusChanged.connect(print)
-		# self.q_media.positionChanged.connect(print)
-
 	def reset(self):
+		# HACK : rebuilding the QMediaPlayer each time
 		self.stop()
+
+		if self.q_media is not None:
+			del self.q_media
+
+		self.q_media = QtMultimedia.QMediaPlayer()
+		self.q_media.setAudioOutput(self.q_audio)
+		self.q_media.setVideoOutput(self.q_video)
 		self.q_media.setSource('http://127.0.0.1:6969/')  # TODO
 
 	def play(self):
-		if self.q_media.playbackState() != QtMultimedia.QMediaPlayer.PlayingState:
+		if self.q_media is not None:
 			self.q_media.play()
 
 	def stop(self):
-		if self.q_media.playbackState() != QtMultimedia.QMediaPlayer.StoppedState:
+		if self.q_media is not None and self.q_media.playbackState() != QtMultimedia.QMediaPlayer.StoppedState:
 			self.q_media.stop()
 
 	def pause(self):
-		if self.q_media.playbackState() != QtMultimedia.QMediaPlayer.PausedState:
+		if self.q_media is not None and self.q_media.playbackState() != QtMultimedia.QMediaPlayer.PausedState:
 			self.q_media.pause()
 
 
@@ -274,13 +276,13 @@ class BirbwatchMain(QtWidgets.QMainWindow):
 
 	def show_player(self):
 		self.centralWidget().setCurrentWidget(self.player_widget)
-		self.player_widget.reset()  # TODO : whyyyyyyy do you only work the first time ??
+		self.player_widget.reset()
 		self.player_widget.play()
 		self.statusBar().setVisible(False)  # TODO : turn status off or on in config
 
 	def show_settings(self):
 		self.centralWidget().setCurrentWidget(self.settings_widget)
-		self.player_widget.pause()
+		self.player_widget.stop()
 		self.statusBar().setVisible(True)
 
 	def set_selected_stream(self, stream: Optional[Stream]):
