@@ -1,17 +1,22 @@
 import sys
 import functools
+
 import asyncio
-from PySide6.QtWidgets import QWidget, QListWidget, QListWidgetItem, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QStyle, QStackedWidget
+import concurrent.futures
+
+from PySide6.QtWidgets import QWidget, QTreeWidget, QTreeWidgetItem, QListWidgetItem, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QStyle, QStackedWidget
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import Signal, Slot, QObject
 from PySide6.QtGui import QIcon
 from qasync import asyncSlot, asyncClose, QApplication
-from .streams import Stream, get_streams
+from .streams import Stream, get_streams_db, get_sl_streams, is_healthy
 
 
 class Communicate(QObject):
 	refresh_streams = Signal()
+	refresh_streams_getting = Signal()
+	refresh_streams_validating = Signal()
 	refresh_streams_done = Signal()
 	show_player = Signal()
 	reset_player = Signal()
@@ -21,32 +26,65 @@ class Communicate(QObject):
 C = Communicate()
 
 
-class StreamItem(QListWidgetItem):
+class StreamItem(QTreeWidgetItem):
 	def __init__(self, stream: Stream):
-		super().__init__(stream.name)
+		super().__init__([stream.name, '?', ''])
 
 		self.stream = stream
 
+	def validate(self):
+		print(f'validating {self.stream.url}')
+		sl_streams = get_sl_streams(self.stream.url)
+		sl_stream = sl_streams['worst']  # TODO : unhardcode this
+		healthy = is_healthy(sl_stream)
 
-class StreamListWidget(QListWidget):
+		if healthy:
+			self.setText(1, '✓')  # TODO : QIcon
+		else:
+			self.setText(1, 'ERR')
+
+
+class StreamListWidget(QTreeWidget):
 	def __init__(self):
 		super().__init__()
+
+		self.setItemsExpandable(False)
+		self.setRootIsDecorated(False)
+
+		self.setHeaderLabels(['stream', 'ok', 'playing'])
+		# TODO : resize columns
 
 		C.refresh_streams.connect(self.refresh_streams)
 
 		# TODO : enable by default
 		# self.refresh_streams()
 
-		# TODO : stream sanity check
-
 	@asyncSlot()
 	async def refresh_streams(self):
-		streams: list[Stream] = await get_streams()
+		streams: list[Stream] = await get_streams_db()
 
 		self.clear()
 
+		# Insert streams
+		C.refresh_streams_getting.emit()
 		for stream in streams:
-			self.addItem(StreamItem(stream))
+			self.insertTopLevelItem(0, StreamItem(stream))
+
+		# Validate each stream
+		# TODO : this needs some work with the user interface which hangs
+		C.refresh_streams_validating.emit()
+
+		async def do():
+			with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+				executor.map(
+					lambda streamitem: streamitem.validate(),
+					[self.topLevelItem(streamitem_idx) for streamitem_idx in range(self.topLevelItemCount())]
+				)
+		await do()
+
+		# async does not work because the Streams from streamlink are not async
+		# tasks = (self.topLevelItem(streamitem_idx).validate() for streamitem_idx in range(self.topLevelItemCount()))
+		# await asyncio.gather(*tasks)
 
 		C.refresh_streams_done.emit()
 
@@ -55,7 +93,7 @@ class StreamActionWidget(QWidget):
 	def __init__(self):
 		super().__init__()
 
-		self.q_layout = QHBoxLayout()
+		self.q_layout = QHBoxLayout()  # TODO : change to self.layout()
 		self.q_layout.setContentsMargins(0, 0, 0, 0)
 		self.setLayout(self.q_layout)
 
@@ -127,7 +165,7 @@ class BirbwatchMain(QMainWindow):
 
 		self.q_status = self.statusBar()
 		self.q_status.setSizeGripEnabled(False)
-		self.update_status('Ready')
+		self.update_status('Ready.')
 
 		self.setCentralWidget(QStackedWidget())  # WARNING: takes ownership !
 
@@ -138,11 +176,13 @@ class BirbwatchMain(QMainWindow):
 		self.centralWidget().addWidget(self.player_widget)
 
 		C.refresh_streams.connect(functools.partial(self.update_status, 'Refreshing streams...'))
-		C.refresh_streams_done.connect(functools.partial(self.update_status, 'Done refreshing streams'))
+		C.refresh_streams_getting.connect(functools.partial(self.update_status, 'Getting streams...'))
+		C.refresh_streams_validating.connect(functools.partial(self.update_status, 'Validating streams...'))
+		C.refresh_streams_done.connect(functools.partial(self.update_status, 'Done refreshing streams.'))
 		C.show_player.connect(self.show_player)
 		C.show_settings.connect(self.show_settings)
 
-		self.show_player()
+		self.show_settings()
 
 	def update_status(self, msg):
 		self.q_status.showMessage(msg)
