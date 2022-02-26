@@ -12,7 +12,6 @@ class Stream:
 	name: str
 	description: str
 	url: str
-	playing: Optional[bool] = None
 	healthy: Optional[bool] = None
 
 _session = streamlink.Streamlink()
