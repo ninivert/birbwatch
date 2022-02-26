@@ -1,4 +1,3 @@
-import http
 import httpx
 import streamlink
 from streamlink.stream.stream import Stream as SL_Stream
