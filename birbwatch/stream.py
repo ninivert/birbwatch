@@ -1,16 +1,26 @@
 __all__ = ['Stream', 'get_streams_db', 'get_streamlink_streams', 'is_healthy']
 
+from optparse import Option
 import requests
 import streamlink
 from streamlink.stream.stream import Stream as SL_Stream
-from collections import namedtuple
+from typing import Optional
+from dataclasses import dataclass
 
-Stream = namedtuple('Stream', ('name', 'description', 'url'))
+@dataclass
+class Stream:
+	name: str
+	description: str
+	url: str
+	playing: Optional[bool] = None
+	healthy: Optional[bool] = None
+
 _session = streamlink.Streamlink()
 
 
 def get_streams_db() -> list[Stream]:
 	# TODO : put this in a config file
+	# TODO : allow to get from disk too
 	url = 'https://raw.githubusercontent.com/ninivert/birbwatch/main/streams.json'
 
 	res = requests.get(url)
