@@ -1,11 +1,17 @@
 __all__ = ['Stream', 'get_streams_db', 'get_streamlink_streams', 'is_healthy']
 
-from optparse import Option
+import logging
+import json
 import requests
 import streamlink
 from streamlink.stream.stream import Stream as SL_Stream
 from typing import Optional
 from dataclasses import dataclass
+
+from .config import *
+
+_logger = logging.getLogger(__name__)
+_logger.setLevel(config.getint('logging', 'level'))
 
 @dataclass
 class Stream:
@@ -13,18 +19,36 @@ class Stream:
 	description: str
 	url: str
 	healthy: Optional[bool] = None
+	quality: Optional[str] = None
 
 _session = streamlink.Streamlink()
 
-
 def get_streams_db() -> list[Stream]:
-	# TODO : put this in a config file
-	# TODO : allow to get from disk too
-	url = 'https://raw.githubusercontent.com/ninivert/birbwatch/main/streams.json'
+	data = None
 
-	res = requests.get(url)
-	data = res.json()
+	# try in order of priority to get the stream database .json file from the sources listed in config.ini
+	for source in config.get('behavior', 'stream_db_source').strip().split('\n'):
+		try:
+			if source.startswith('https://') or source.startswith('http://'):
+				res = requests.get(source)
+				data = res.json()
+				break
 
+			elif source.startswith('file://'):
+				filepath = source[7:]
+				with open(filepath) as file:
+					data = json.load(file)
+				break
+
+		except Exception as e:
+			_logger.warning(f'could not get stream data from {source}\n{e}')
+			data = None
+	
+	if data is None:
+		_logger.error('could not get stream data from any source')
+		return []
+
+	_logger.debug(f'got stream data from source {source}')
 	streams = [Stream(name=stream['name'], description=stream['description'], url=stream['url']) for stream in data['streamlist']]
 
 	return streams

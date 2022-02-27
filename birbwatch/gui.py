@@ -1,12 +1,18 @@
 import functools
 from typing import Optional
+import logging
 
 from .stream import *
 from .server import *
 from .thread import *
+from .config import *
 
 from PySide6.QtCore import Signal, Slot, QObject
 from PySide6 import QtWidgets, QtGui, QtMultimedia, QtMultimediaWidgets
+
+logging.basicConfig()
+_logger = logging.getLogger(__name__)
+_logger.setLevel(config.getint('logging', 'level'))    # TODO : logging to file
 
 class Communicate(QObject):
 	refresh_streams = Signal()
@@ -20,6 +26,7 @@ class Communicate(QObject):
 
 
 C = Communicate()
+SERVER = StreamServer(config.getint('streamserver', 'port'), config.get('streamlink', 'quality'))
 
 
 class StreamItem(QtWidgets.QTreeWidgetItem):
@@ -30,6 +37,7 @@ class StreamItem(QtWidgets.QTreeWidgetItem):
 
 		self.treeWidget().setItemWidget(self, 0, QtWidgets.QLabel())
 		self.treeWidget().setItemWidget(self, 1, QtWidgets.QLabel())
+		self.treeWidget().setItemWidget(self, 2, QtWidgets.QLabel())
 
 		self.validation_worker = TaskManager(max_workers=1, name=f'validate')  # TODO : cleanup after yourself ! some threads are lingering
 		self.validation_worker.finished.connect(self.validate_callback)
@@ -39,20 +47,35 @@ class StreamItem(QtWidgets.QTreeWidgetItem):
 	def update(self):
 		self.treeWidget().itemWidget(self, 0).setText(f'{self.stream.name}<br><i>{self.stream.description}</i>')
 		self.treeWidget().itemWidget(self, 1).setText('?' if self.stream.healthy is None else 'OK' if self.stream.healthy else 'ERR')
+		self.treeWidget().itemWidget(self, 2).setText('?' if self.stream.quality is None else self.stream.quality)
 
 	def validate(self) -> TaskResult:
 		try:
-			sl_streams = get_streamlink_streams(self.stream.url)  # TODO : timeout
-			sl_stream = sl_streams['worst']  # TODO : unhardcode this
+			sl_streams = get_streamlink_streams(self.stream.url)
+			sl_stream = None
+
+			# query the streams to try to get the highest priority quality (defined in config.ini)
+			for quality in config.get('streamlink', 'quality').split(','):
+				if quality in sl_streams:
+					sl_stream = sl_streams[quality]
+					_logger.debug(f'found quality {quality} for stream url {self.stream.url}')
+					break
+
+			# failed to get a stream (should never happen, 'worst' is a fallback already)
+			if sl_stream is None:
+				raise Exception(f'could not find a stream quality from {sl_streams}')
+
 			healthy = is_healthy(sl_stream)
+
 		except Exception as e:
-			print(f'could not get stream {self.stream.url} : {e}')  # TODO : logging !!
+			_logger.info(f'could not get stream {self.stream.url}\n{e}')
 			healthy = False
+			quality = None
 		
-		return TaskResult(healthy, 0)
+		return TaskResult((healthy, quality), 0)
 
 	def validate_callback(self, result: TaskResult):
-		self.stream.healthy = result.data
+		self.stream.healthy, self.stream.quality = result.data
 		self.update()
 
 
@@ -62,13 +85,15 @@ class StreamListWidget(QtWidgets.QTreeWidget):
 
 		self.setItemsExpandable(False)
 		self.setRootIsDecorated(False)
-		self.setHeaderLabels(['stream', 'status'])
+		self.setHeaderLabels(['stream', 'status', 'quality'])
 		self.header().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
 		self.header().setSectionResizeMode(1, QtWidgets.QHeaderView.Fixed)
+		self.header().setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)
 		self.header().setStretchLastSection(False)
-		self.header().resizeSection(1, 40)
+		self.header().resizeSection(1, 60)
+		self.header().resizeSection(2, 60)
 
-		self.refresh_worker = TaskManager(max_workers=1, name='refresh')  # TODO : put max_workers in config file
+		self.refresh_worker = TaskManager(max_workers=1, name='refresh')
 		self.refresh_worker.finished.connect(self.refresh_callback)
 		C.refresh_streams.connect(lambda: self.refresh_worker.submit(self.refresh))
 
@@ -130,6 +155,8 @@ class StreamActionWidget(QtWidgets.QWidget):
 		C.refresh_streams_validating_partial.connect(lambda: self.update_playbtn(self._current_stream))
 		C.refresh_streams.connect(lambda: self.q_refreshbtn.setEnabled(False))
 		C.refresh_streams_done.connect(lambda: self.q_refreshbtn.setEnabled(True))
+		C.show_player.connect(lambda: self.q_playbtn.setEnabled(False))
+		SERVER.started.connect(lambda: self.q_playbtn.setEnabled(True))
 
 		self._current_stream = None
 
@@ -178,7 +205,7 @@ class PlayerWidget(QtWidgets.QWidget):
 		self.q_media = QtMultimedia.QMediaPlayer()
 		self.q_media.setAudioOutput(self.q_audio)
 		self.q_media.setVideoOutput(self.q_video)
-		self.q_media.setSource('http://127.0.0.1:6969/')  # TODO
+		self.q_media.setSource(f'http://127.0.0.1:{config.get("streamserver", "port")}/')
 		self.q_media.play()
 
 	def stop(self):
@@ -191,7 +218,6 @@ class BirbwatchMain(QtWidgets.QMainWindow):
 		super().__init__()
 
 		self.selected_stream: Optional[Stream] = None
-		self.server = StreamServer(6969, '360p,240p,480p,worst')  # TODO : move this to config file
 
 		self.statusBar().setSizeGripEnabled(False)
 		self.statusBar().showMessage('Ready.')
@@ -202,7 +228,7 @@ class BirbwatchMain(QtWidgets.QMainWindow):
 		self.centralWidget().addWidget(self.settings_widget)
 		self.centralWidget().addWidget(self.player_widget)
 
-		C.refresh_streams.connect(functools.partial(self.statusBar().showMessage, 'Refreshing streams...'))
+		C.refresh_streams.connect(functools.partial(self.statusBar().showMessage, 'Refreshing streams...'))  # TODO: loading spinner
 		C.refresh_streams_getting.connect(functools.partial(self.statusBar().showMessage, 'Getting streams...'))
 		C.refresh_streams_validating.connect(functools.partial(self.statusBar().showMessage, 'Validating streams...'))
 		C.refresh_streams_done.connect(functools.partial(self.statusBar().showMessage, 'Done refreshing streams.'))
@@ -210,37 +236,43 @@ class BirbwatchMain(QtWidgets.QMainWindow):
 		C.show_player.connect(self.show_player)
 		C.show_settings.connect(self.show_settings)
 		C.selected_stream_update.connect(self.set_selected_stream)
+		SERVER.started.connect(self.show_player_callback)
 
 		self.show_settings()
 		C.refresh_streams.emit()
 
 	def start_stream(self):
+		_logger.debug(f'attempting to start stream {self.selected_stream}')
 		self.stop_stream()
-
+		
 		if self.selected_stream is not None and self.selected_stream.healthy:
-			self.server.start(self.selected_stream.url)
+			SERVER.start(self.selected_stream.url)
+			_logger.debug(f'started stream {self.selected_stream}')
+		else:
+			_logger.warning(f'stream {self.selected_stream} is not playable')
 
 	def stop_stream(self):
+		_logger.debug('stopping stream')
 		self.player_widget.stop()
-		self.server.stop()
+		SERVER.stop()
 
 	def show_player(self):
 		self.start_stream()
 		self.statusBar().showMessage('Starting stream...')
-		self.server.started.connect(self.show_player_callback)
 
 	def show_player_callback(self):
 		self.centralWidget().setCurrentWidget(self.player_widget)
 		self.player_widget.restart()
 		self.statusBar().showMessage('Streaming...')
-		# self.statusBar().setVisible(False)  # TODO : turn status off or on in config
+		self.statusBar().setVisible(config.getboolean('behavior', 'show_statusbar_streaming'))
 
 	def show_settings(self):
 		self.centralWidget().setCurrentWidget(self.settings_widget)
 		self.player_widget.stop()
 		self.stop_stream()
-		# self.statusBar().setVisible(True)
+		self.statusBar().setVisible(True)  # restore statusbar visibility after returning from streaming
 		self.statusBar().showMessage('Ready.')
 
 	def set_selected_stream(self, stream: Optional[Stream]):
+		# TODO : selection can still change when stream is loading, either block it or add a cancel button
 		self.selected_stream = stream

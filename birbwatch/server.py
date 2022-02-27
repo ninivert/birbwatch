@@ -50,7 +50,7 @@ class StreamServer(QObject):
 			# [cli][info] Starting server, access with one of:
 			# [cli][info]  http://127.0.0.1:6969/
 			# [cli][info]  http://127.0.1.1:6969/
-			if 'http://127.0.0.1:6969/' in line:
+			if 'http://127.0.0.1' in line:
 				self.started.emit()
 				return
 
