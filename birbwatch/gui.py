@@ -10,9 +10,9 @@ from .config import *
 from PySide6.QtCore import Signal, Slot, QObject
 from PySide6 import QtWidgets, QtGui, QtMultimedia, QtMultimediaWidgets
 
-logging.basicConfig()
+logging.basicConfig(filename=config.get('logging', 'logfile'), format=config.get('logging', 'format'))
 _logger = logging.getLogger(__name__)
-_logger.setLevel(config.getint('logging', 'level'))    # TODO : logging to file
+_logger.setLevel(config.getint('logging', 'level'))
 
 class Communicate(QObject):
 	refresh_streams = Signal()
@@ -26,7 +26,10 @@ class Communicate(QObject):
 
 
 C = Communicate()
-SERVER = StreamServer(config.getint('streamserver', 'port'), config.get('streamlink', 'quality'))
+SERVER = StreamServer(
+	config.getint('streamserver', 'port'),
+	','.join(config.get('streamlink', 'quality').strip().split('\n'))
+)
 
 
 class StreamItem(QtWidgets.QTreeWidgetItem):
@@ -39,7 +42,7 @@ class StreamItem(QtWidgets.QTreeWidgetItem):
 		self.treeWidget().setItemWidget(self, 1, QtWidgets.QLabel())
 		self.treeWidget().setItemWidget(self, 2, QtWidgets.QLabel())
 
-		self.validation_worker = TaskManager(max_workers=1, name=f'validate')  # TODO : cleanup after yourself ! some threads are lingering
+		self.validation_worker = TaskManager(name=f'validate')
 		self.validation_worker.finished.connect(self.validate_callback)
 
 		self.update()
@@ -55,7 +58,7 @@ class StreamItem(QtWidgets.QTreeWidgetItem):
 			sl_stream = None
 
 			# query the streams to try to get the highest priority quality (defined in config.ini)
-			for quality in config.get('streamlink', 'quality').split(','):
+			for quality in config.get('streamlink', 'quality').strip().split('\n'):
 				if quality in sl_streams:
 					sl_stream = sl_streams[quality]
 					_logger.debug(f'found quality {quality} for stream url {self.stream.url}')
@@ -68,7 +71,7 @@ class StreamItem(QtWidgets.QTreeWidgetItem):
 			healthy = is_healthy(sl_stream)
 
 		except Exception as e:
-			_logger.info(f'could not get stream {self.stream.url}\n{e}')
+			_logger.info(f'could not get stream {self.stream.url} : {e}')
 			healthy = False
 			quality = None
 		
@@ -93,7 +96,7 @@ class StreamListWidget(QtWidgets.QTreeWidget):
 		self.header().resizeSection(1, 60)
 		self.header().resizeSection(2, 60)
 
-		self.refresh_worker = TaskManager(max_workers=1, name='refresh')
+		self.refresh_worker = TaskManager(name='refresh')
 		self.refresh_worker.finished.connect(self.refresh_callback)
 		C.refresh_streams.connect(lambda: self.refresh_worker.submit(self.refresh))
 
@@ -228,6 +231,8 @@ class BirbwatchMain(QtWidgets.QMainWindow):
 		self.centralWidget().addWidget(self.settings_widget)
 		self.centralWidget().addWidget(self.player_widget)
 
+		# TODO : when entering and exiting the player while the streams are still refreshing,
+		# the statusbar displays "Ready." -> FIX : application status
 		C.refresh_streams.connect(functools.partial(self.statusBar().showMessage, 'Refreshing streams...'))  # TODO: loading spinner
 		C.refresh_streams_getting.connect(functools.partial(self.statusBar().showMessage, 'Getting streams...'))
 		C.refresh_streams_validating.connect(functools.partial(self.statusBar().showMessage, 'Validating streams...'))
@@ -239,7 +244,9 @@ class BirbwatchMain(QtWidgets.QMainWindow):
 		SERVER.started.connect(self.show_player_callback)
 
 		self.show_settings()
-		C.refresh_streams.emit()
+
+		if config.getboolean('behavior', 'refresh_on_start'):
+			C.refresh_streams.emit()
 
 	def start_stream(self):
 		_logger.debug(f'attempting to start stream {self.selected_stream}')

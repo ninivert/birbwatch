@@ -14,8 +14,7 @@ class StreamServer(QObject):
 		self.port: int = port
 		self.quality: str = quality
 		self._proc: Optional[subprocess.Popen] = None
-		self._worker = TaskManager(max_workers=1, name='emit_when_stream_server_started')
-		# self._stream_url: Optional[str] = None
+		self._worker = TaskManager(name='emit_when_stream_server_started')
 
 	@property
 	def loc(self):
