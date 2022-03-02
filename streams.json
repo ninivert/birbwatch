@@ -14,6 +14,81 @@
 			"name": "invalid example",
 			"description": "i will cause problems on purpose",
 			"url": "https://thisstreamdoesnotexistpleasedonotthankyou.com"
+		},
+		{
+			"name": "Cornell Feeder at Sapsucker Woods",
+			"description": "Cornell Lab FeederWatch Cam at Sapsucker Woods",
+			"url": "https://www.youtube.com/watch?v=N609loYkFJo"
+		},
+		{
+			"name": "Panama Fruit Feeder at Canopy Lodge",
+			"description": "Panama Fruit Feeder Can at Canopy Lodge | Cornell Lab",
+			"url": "https://www.youtube.com/watch?v=WtoxxHADnGk"
+		},
+		{
+			"name": "Bermuda Petrels (Burrow 1)",
+			"description": "Endangered Bermuda Petrels Live! CahowCam Burrow 1 | Nonsuch Expeditions | Cornell Lab",
+			"url": "https://www.youtube.com/watch?v=IIG1qYRTCaE"
+		},
+		{
+			"name": "Boreal Birds Feeder in Ontario (Canada)",
+			"description": "Live Boreal Birds at the Ontario FeederWatch Cam, Powered by Perky-Pet® | Cornell Lab",
+			"url": "https://www.youtube.com/watch?v=AN7Ddt-2cp4"
+		},
+		{
+			"name": "Great Horned Owls nesting at Savannah (USA)",
+			"description": "LIVE Great Horned Owls Nesting Near Savannah, GA | Cam 1 PTZ | Cornell Lab & Skidaway Audubon",
+			"url": "https://www.youtube.com/watch?v=7NFSAV15gpc"
+		},
+		{
+			"name": "Bird Feeder at Gettystburg (USA)",
+			"description": "LIVE Bird Feeder Cam (4K) Gettysburg PA, over 30 species identified.",
+			"url": "https://www.youtube.com/watch?v=2uabwdYMzVk"
+		},
+		{
+			"name": "Animal Feeder at Pretoria (South Africa)",
+			"description": "LIVE Animal Cam from South Africa! (Primates, bats, and beautiful birds)",
+			"url": "https://www.youtube.com/watch?v=mMHLc6I_46U"
+		},
+		{
+			"name": "Bird Feeder at Nokomis (Florida)",
+			"description": "LIVE 4K Bird Feeder Cam in Nokomis Florida",
+			"url": "https://www.youtube.com/watch?v=q5MAc6DGSQc"
+		},
+		{
+			"name": "Bird Bath at Recke (Germany)",
+			"description": "LIVE Bird Bath Cam - Recke, Germany",
+			"url": "https://www.youtube.com/watch?v=LAP4VuYDAdc"
+		},
+		{
+			"name": "Animal and Bird Feeder at Recke (Germany)",
+			"description": "LIVE 4K Wild Animal & Bird Feeder Cam - Recke, Germany - Hedgehog & Bird Watching, 24/7, ASMR",
+			"url": "https://www.youtube.com/watch?v=f7AJwlVzd1c"
+		},
+		{
+			"name": "Bird Feeder at Recke (Germany)",
+			"description": "LIVE 4K Bird Feeder Cam - Recke, Germany (Bird watching)",
+			"url": "https://www.youtube.com/watch?v=cX-Zq4MWXZI"
+		},
+		{
+			"name": "Tree Bird Feeder at Recke (Germany)",
+			"description": "LIVE Tree Bird Feeder Cam - Recke, Germany",
+			"url": "https://www.youtube.com/watch?v=PDRApu7KXVc"
+		},
+		{
+			"name": "Wild Hedgehog Hibernation Nest Cam at Recke (Germany)",
+			"description": "LIVE 4K Wild Hedgehog Hibernation Nest Cam - Recke, Germany",
+			"url": "https://www.youtube.com/watch?v=tVkYWVhGdSM"
+		},
+		{
+			"name": "Animal Rescue Center at Makov (Czech Republic)",
+			"description": "Záchranná stanice živočichů Makov - krmítko",
+			"url": "https://www.youtube.com/watch?v=PviDO3ZVwwE"
+		},
+		{
+			"name": "Forest Feeder at Tresna (Poland)",
+			"description": "Forest Feeder at Tresna (Poland)",
+			"url": "https://www.youtube.com/watch?v=-Z4W0iltQ5U"
 		}
 	]
 }
