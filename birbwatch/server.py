@@ -1,11 +1,31 @@
 import subprocess
 from typing import Optional
-from PySide6.QtCore import QObject, Signal
-from .thread import *
+from PySide6.QtCore import QObject, Signal, QRunnable, QThreadPool
 
 __all__ = ['StreamServer']
 
 class StreamServer(QObject):
+	class LurkerWorker(QObject, QRunnable):
+		result = Signal()
+
+		def __init__(self, process):
+			QObject.__init__(self)
+			QRunnable.__init__(self)
+			self._process = process
+
+		def run(self):
+			# a very hacky way to tell when the server has started :
+			# read the stdout of the streamlink subprocess and look for message confirming server started
+			for line in self._process.stdout:
+				# example log :
+				# [cli][info] Available streams: 144p (worst), 240p, 360p, 480p, 720p, 1080p (best)
+				# [cli][info] Starting server, access with one of:
+				# [cli][info]  http://127.0.0.1:6969/
+				# [cli][info]  http://127.0.1.1:6969/
+				if 'http://127.0.0.1' in line:
+					self.result.emit()
+					return
+
 	started = Signal()
 
 	def __init__(self, port: int, quality: str):
@@ -14,7 +34,8 @@ class StreamServer(QObject):
 		self.port: int = port
 		self.quality: str = quality
 		self._proc: Optional[subprocess.Popen] = None
-		self._worker = TaskManager(name='emit_when_stream_server_started')
+		self._lurker_pool: QThreadPool = QThreadPool()
+		self._lurker_pool.setMaxThreadCount(1)
 
 	@property
 	def loc(self):
@@ -38,20 +59,9 @@ class StreamServer(QObject):
 			text=True
 		)
 
-		self._worker.submit(self.emit_when_started)
-
-	def emit_when_started(self):
-		# a very hacky way to tell when the server has started :
-		# read the stdout of the streamlink subprocess and look for message confirming server started
-		for line in self._proc.stdout:
-			# example log :
-			# [cli][info] Available streams: 144p (worst), 240p, 360p, 480p, 720p, 1080p (best)
-			# [cli][info] Starting server, access with one of:
-			# [cli][info]  http://127.0.0.1:6969/
-			# [cli][info]  http://127.0.1.1:6969/
-			if 'http://127.0.0.1' in line:
-				self.started.emit()
-				return
+		lurker = StreamServer.LurkerWorker(self._proc)
+		lurker.result.connect(self.started.emit)
+		self._lurker_pool.start(lurker)
 
 	def stop(self):
 		if self.running:

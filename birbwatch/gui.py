@@ -1,13 +1,13 @@
+from dataclasses import dataclass
 import functools
 from typing import Optional
 import logging
 
 from .stream import *
 from .server import *
-from .thread import *
 from .config import *
 
-from PySide6.QtCore import Signal, Slot, QObject
+from PySide6.QtCore import Signal, QObject, QRunnable, QThreadPool
 from PySide6 import QtWidgets, QtGui, QtMultimedia, QtMultimediaWidgets
 
 logging.basicConfig(filename=config.get('logging', 'logfile'), format=config.get('logging', 'format'))
@@ -32,6 +32,32 @@ SERVER = StreamServer(
 )
 
 
+@dataclass
+class State:
+	streaming: bool = False
+	getting: bool = False
+	validating: bool = False
+
+	@property
+	def idle(self) -> bool:
+		return not self.streaming and not self.refreshing
+
+	@property
+	def refreshing(self) -> bool:
+		return self.getting or self.validating
+
+STATE = State()
+
+# TODO : hook this with the status bar
+C.refresh_streams.connect(lambda: STATE.__setattr__('getting', True))
+C.refresh_streams_validating.connect(lambda: STATE.__setattr__('getting', False))
+C.refresh_streams_validating.connect(lambda: STATE.__setattr__('validating', True))
+C.refresh_streams_done.connect(lambda: STATE.__setattr__('getting', False))
+C.refresh_streams_done.connect(lambda: STATE.__setattr__('validating', False))
+C.show_player.connect(lambda: STATE.__setattr__('streaming', True))
+C.show_settings.connect(lambda: STATE.__setattr__('streaming', False))
+
+
 class StreamItem(QtWidgets.QTreeWidgetItem):
 	def __init__(self, parent, stream: Stream):
 		super().__init__(parent)
@@ -42,9 +68,6 @@ class StreamItem(QtWidgets.QTreeWidgetItem):
 		self.treeWidget().setItemWidget(self, 1, QtWidgets.QLabel())
 		self.treeWidget().setItemWidget(self, 2, QtWidgets.QLabel())
 
-		self.validation_worker = TaskManager(name=f'validate')
-		self.validation_worker.finished.connect(self.validate_callback)
-
 		self.update()
 
 	def update(self):
@@ -52,37 +75,58 @@ class StreamItem(QtWidgets.QTreeWidgetItem):
 		self.treeWidget().itemWidget(self, 1).setText('?' if self.stream.healthy is None else 'OK' if self.stream.healthy else 'ERR')
 		self.treeWidget().itemWidget(self, 2).setText('?' if self.stream.quality is None else self.stream.quality)
 
-	def validate(self) -> TaskResult:
-		try:
-			sl_streams = get_streamlink_streams(self.stream.url)
-			sl_stream = None
-
-			# query the streams to try to get the highest priority quality (defined in config.ini)
-			for quality in config.get('streamlink', 'quality').strip().split('\n'):
-				if quality in sl_streams:
-					sl_stream = sl_streams[quality]
-					_logger.debug(f'found quality {quality} for stream url {self.stream.url}')
-					break
-
-			# failed to get a stream (should never happen, 'worst' is a fallback already)
-			if sl_stream is None:
-				raise Exception(f'could not find a stream quality from {sl_streams}')
-
-			healthy = is_healthy(sl_stream)
-
-		except Exception as e:
-			_logger.info(f'could not get stream {self.stream.url} : {e}')
-			healthy = False
-			quality = None
-		
-		return TaskResult((healthy, quality), 0)
-
-	def validate_callback(self, result: TaskResult):
-		self.stream.healthy, self.stream.quality = result.data
+	def validate_callback(self, healthy: bool, quality: str):
+		self.stream.healthy = healthy
+		self.stream.quality = quality
 		self.update()
 
 
 class StreamListWidget(QtWidgets.QTreeWidget):
+	class RefreshRunnable(QObject, QRunnable):
+		result = Signal(list)
+
+		def __init__(self):
+			QObject.__init__(self)
+			QRunnable.__init__(self)
+	
+		def run(self):
+			C.refresh_streams_getting.emit()
+			streams: list[Stream] = get_streams_db()
+			self.result.emit(streams)
+
+	class ValidatorRunnable(QObject, QRunnable):
+		result = Signal(bool, str)  # return data from the run function
+
+		def __init__(self, stream: Stream):
+			QObject.__init__(self)
+			QRunnable.__init__(self)
+			self._stream = stream
+	
+		def run(self):
+			try:
+				sl_streams = get_streamlink_streams(self._stream.url)
+				sl_stream = None
+
+				# query the streams to try to get the highest priority quality (defined in config.ini)
+				for quality in config.get('streamlink', 'quality').strip().split('\n'):
+					if quality in sl_streams:
+						sl_stream = sl_streams[quality]
+						_logger.debug(f'found quality {quality} for stream url {self._stream.url}')
+						break
+
+				# failed to get a stream (should never happen, 'worst' is a fallback already)
+				if sl_stream is None:
+					raise Exception(f'could not find a stream quality from {sl_streams}')
+
+				healthy = is_healthy(sl_stream)
+
+			except Exception as e:
+				_logger.info(f'could not get stream {self._stream.url} : {e}')
+				healthy = False
+				quality = None
+			
+			self.result.emit(healthy, quality)
+
 	def __init__(self):
 		super().__init__()
 
@@ -96,9 +140,11 @@ class StreamListWidget(QtWidgets.QTreeWidget):
 		self.header().resizeSection(1, 60)
 		self.header().resizeSection(2, 60)
 
-		self.refresh_worker = TaskManager(name='refresh')
-		self.refresh_worker.finished.connect(self.refresh_callback)
-		C.refresh_streams.connect(lambda: self.refresh_worker.submit(self.refresh))
+		self._refresh_pool = QThreadPool(self)
+		self._validate_pool = QThreadPool(self)
+		self._refresh_pool.setMaxThreadCount(1)
+
+		C.refresh_streams.connect(self.refresh)
 
 		self.currentItemChanged.connect(lambda curr, prev: C.selected_stream_update.emit(None if curr is None else curr.stream))
 
@@ -106,27 +152,31 @@ class StreamListWidget(QtWidgets.QTreeWidget):
 	def stream_items(self) -> list[StreamItem]:
 		return [self.topLevelItem(streamitem_idx) for streamitem_idx in range(self.topLevelItemCount())]
 
-	def refresh(self) -> TaskResult:
+	def refresh(self):
 		C.refresh_streams_getting.emit()
-		streams: list[Stream] = get_streams_db()
-		return TaskResult(streams, 0)
+		refresh_runnable = StreamListWidget.RefreshRunnable()
+		refresh_runnable.result.connect(self.validate)
+		self._refresh_pool.start(refresh_runnable)
+		# self._refresh_pool.waitForDone()
 
-	def refresh_callback(self, result: TaskResult):
+	def validate(self, streams: list[Stream]):
 		self.clear()
 
 		# Repopulate with new streams
-		for stream in result.data:
+		for stream in streams:
 			self.insertTopLevelItem(0, StreamItem(self, stream))
 
 		# Validate all
 		C.refresh_streams_validating.emit()
 		self.num_validated = 0
 		for stream_item in self.stream_items:
-			stream_item.validation_worker.finished.connect(self.validate_partial_callback)
-			stream_item.validation_worker.submit(stream_item.validate)
+			validate_runnable = StreamListWidget.ValidatorRunnable(stream_item.stream)
+			validate_runnable.result.connect(self.validate_partial_callback)
+			validate_runnable.result.connect(stream_item.validate_callback)
+			self._validate_pool.start(validate_runnable)
 		C.refresh_streams_validating_partial.emit(self.num_validated, len(self.stream_items))
 
-	def validate_partial_callback(self, result: TaskResult):
+	def validate_partial_callback(self, healthy: bool, quality: str):
 		self.num_validated += 1
 		C.refresh_streams_validating_partial.emit(self.num_validated, len(self.stream_items))
 
@@ -199,7 +249,8 @@ class PlayerWidget(QtWidgets.QWidget):
 		C.show_settings.emit()  # close on click
 
 	def restart(self):
-		# HACK : rebuilding the QMediaPlayer each time because it crashes to an irrecoverable state everytime the source is not valid anymore
+		# HACK : rebuilding he QMediaPlayer each time because it crashes to an irrecoverable state everytime the source is not valid anymore
+		# https://doc.qt.io/qtforpython-5/PySide2/QtMultimedia/QMediaPlayer.html?highlight=qmediaplayer#PySide2.QtMultimedia.PySide2.QtMultimedia.QMediaPlayer
 		self.stop()
 
 		if self.q_media is not None:
