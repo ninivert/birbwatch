@@ -7,7 +7,7 @@ from .stream import *
 from .server import *
 from .config import *
 
-from PySide6.QtCore import Signal, QObject, QRunnable, QThreadPool
+from PySide6.QtCore import Signal, QObject, QRunnable, QThreadPool, QUrl
 from PySide6 import QtWidgets, QtGui, QtMultimedia, QtMultimediaWidgets
 
 logging.basicConfig(filename=config.get('logging', 'logfile'), format=config.get('logging', 'format'))
@@ -234,7 +234,6 @@ class PlayerWidget(QtWidgets.QWidget):
 		self.setLayout(QtWidgets.QVBoxLayout())
 		self.layout().setContentsMargins(0, 0, 0, 0)
 
-		self.q_media = None
 		self.q_audio = QtMultimedia.QAudioOutput()
 		self.q_video = QtMultimediaWidgets.QVideoWidget()
 
@@ -245,25 +244,22 @@ class PlayerWidget(QtWidgets.QWidget):
 		self.layout().addWidget(self.q_video)
 		# self.layout().addWidget(self.q_settingsbtn)
 
+		self.q_media = QtMultimedia.QMediaPlayer()
+		self.q_media.setAudioOutput(self.q_audio)
+		self.q_media.setVideoOutput(self.q_video)
+
 	def mousePressEvent(self, event: QtGui.QMouseEvent):
 		C.show_settings.emit()  # close on click
 
 	def restart(self):
-		# HACK : rebuilding he QMediaPlayer each time because it crashes to an irrecoverable state everytime the source is not valid anymore
-		# https://doc.qt.io/qtforpython-5/PySide2/QtMultimedia/QMediaPlayer.html?highlight=qmediaplayer#PySide2.QtMultimedia.PySide2.QtMultimedia.QMediaPlayer
-		self.stop()
-
-		if self.q_media is not None:
-			del self.q_media
-
-		self.q_media = QtMultimedia.QMediaPlayer()
-		self.q_media.setAudioOutput(self.q_audio)
-		self.q_media.setVideoOutput(self.q_video)
+		self.q_media.stop()
+		# Setting the media to a null QUrl will cause the player to discard all information relating to the current media source and to cease all I/O operations related to that media.
+		self.q_media.setSource(QUrl())
 		self.q_media.setSource(f'http://127.0.0.1:{config.get("streamserver", "port")}/')
 		self.q_media.play()
 
 	def stop(self):
-		if self.q_media is not None and self.q_media.playbackState() != QtMultimedia.QMediaPlayer.StoppedState:
+		if self.q_media.playbackState() != QtMultimedia.QMediaPlayer.StoppedState:
 			self.q_media.stop()
 
 
